@@ -27,6 +27,7 @@ import su.nightexpress.nightcore.util.NumberUtil;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.IntStream;
 
 public class CurrencyCommands {
@@ -59,7 +60,7 @@ public class CurrencyCommands {
         rootNode.addChildren(DirectNode.builder(plugin, "give")
             .permission(Perms.COMMAND_CURRENCY_GIVE)
             .description(Lang.COMMAND_CURRENCY_GIVE_DESC)
-            .withArgument(ArgumentTypes.playerName(CommandArguments.PLAYER).required())
+            .withArgument(CommandArguments.playerOrUUID().required())
             .withArgument(CommandArguments.amount().required())
             .withFlag(CommandFlags.silent())
             .withFlag(CommandFlags.silentOutput())
@@ -69,7 +70,7 @@ public class CurrencyCommands {
         rootNode.addChildren(DirectNode.builder(plugin, "set")
             .permission(Perms.COMMAND_CURRENCY_SET)
             .description(Lang.COMMAND_CURRENCY_SET_DESC)
-            .withArgument(ArgumentTypes.playerName(CommandArguments.PLAYER).required())
+            .withArgument(CommandArguments.playerOrUUID().required())
             .withArgument(CommandArguments.amount().required())
             .withFlag(CommandFlags.silent())
             .withFlag(CommandFlags.silentOutput())
@@ -79,7 +80,7 @@ public class CurrencyCommands {
         rootNode.addChildren(DirectNode.builder(plugin, "take")
             .permission(Perms.COMMAND_CURRENCY_TAKE)
             .description(Lang.COMMAND_CURRENCY_TAKE_DESC)
-            .withArgument(ArgumentTypes.playerName(CommandArguments.PLAYER).required())
+            .withArgument(CommandArguments.playerOrUUID().required())
             .withArgument(CommandArguments.amount().required())
             .withFlag(CommandFlags.silent())
             .withFlag(CommandFlags.silentOutput())
@@ -140,7 +141,7 @@ public class CurrencyCommands {
         return DirectNode.builder(plugin, aliases)
             .permission(Perms.COMMAND_CURRENCY_BALANCE)
             .description(Lang.COMMAND_CURRENCY_BALANCE_DESC)
-            .withArgument(ArgumentTypes.playerName(CommandArguments.PLAYER).permission(Perms.COMMAND_CURRENCY_BALANCE_OTHERS))
+            .withArgument(CommandArguments.playerOrUUID().permission(Perms.COMMAND_CURRENCY_BALANCE_OTHERS))
             .executes((context, arguments) -> showBalance(plugin, currency, context, arguments));
     }
 
@@ -149,7 +150,7 @@ public class CurrencyCommands {
             .playerOnly()
             .permission(Perms.COMMAND_CURRENCY_SEND)
             .description(Lang.COMMAND_CURRENCY_SEND_DESC)
-            .withArgument(ArgumentTypes.playerName(CommandArguments.PLAYER).required())
+            .withArgument(CommandArguments.playerOrUUID().required())
             .withArgument(CommandArguments.amount().required())
             .executes((context, arguments) -> send(plugin, currency, context, arguments));
     }
@@ -166,22 +167,31 @@ public class CurrencyCommands {
     }
 
     public static boolean showBalance(@NotNull CoinsEnginePlugin plugin, @NotNull Currency currency, @NotNull CommandContext context, @NotNull ParsedArguments arguments) {
-        String name = arguments.getStringArgument(CommandArguments.PLAYER, context.getSender().getName());
+        String identifier = arguments.getStringArgument(CommandArguments.PLAYER, context.getSender().getName());
         boolean isOwn = !arguments.hasArgument(CommandArguments.PLAYER);
 
-        plugin.getUserManager().manageUser(name, user -> {
-            if (user == null) {
-                context.errorBadPlayer();
-                return;
-            }
+        final CoinsUser user = getUserFromIdentifier(plugin, identifier);
+        if (user == null) {
+            context.errorBadPlayer();
+            return false;
+        }
 
-            currency.withPrefix((isOwn ? Lang.CURRENCY_BALANCE_DISPLAY_OWN : Lang.CURRENCY_BALANCE_DISPLAY_OTHERS).getMessage()).send(context.getSender(), replacer -> replacer
-                .replace(currency.replacePlaceholders())
-                .replace(Placeholders.PLAYER_NAME, user.getName())
-                .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
-            );
-        });
+        currency.withPrefix((isOwn ? Lang.CURRENCY_BALANCE_DISPLAY_OWN : Lang.CURRENCY_BALANCE_DISPLAY_OTHERS).getMessage()).send(context.getSender(), replacer -> replacer
+            .replace(currency.replacePlaceholders())
+            .replace(Placeholders.PLAYER_NAME, user.getName())
+            .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
+        );
         return true;
+    }
+
+    private static CoinsUser getUserFromIdentifier(@NotNull CoinsEnginePlugin plugin, @NotNull String identifier) {
+        try {
+            UUID uuid = UUID.fromString(identifier);
+            return plugin.getUserManager().getOrFetch(uuid);
+        }
+        catch (IllegalArgumentException e) {
+            return plugin.getUserManager().getOrFetch(identifier);
+        }
     }
 
     public static boolean exchange(@NotNull CoinsEnginePlugin plugin, @NotNull Currency currency, @NotNull CommandContext context, @NotNull ParsedArguments arguments) {
@@ -229,35 +239,35 @@ public class CurrencyCommands {
         double amount = arguments.getDoubleArgument(CommandArguments.AMOUNT);
         if (amount <= 0D) return false;
 
-        plugin.getUserManager().manageUser(arguments.getStringArgument(CommandArguments.PLAYER), user -> {
-            if (user == null) {
-                context.errorBadPlayer();
-                return;
-            }
+        String identifier = arguments.getStringArgument(CommandArguments.PLAYER);
+        final CoinsUser user = getUserFromIdentifier(plugin, identifier);
+        if (user == null) {
+            context.errorBadPlayer();
+            return false;
+        }
 
-            user.addBalance(currency, amount);
+        user.addBalance(currency, amount);
 
-            plugin.getUserManager().save(user);
-            plugin.getCoinsLogger().logGive(user, currency, amount, context.getSender());
+        plugin.getUserManager().save(user);
+        plugin.getCoinsLogger().logGive(user, currency, amount, context.getSender());
 
-            if (!arguments.hasFlag(CommandFlags.SILENT_FEEDBACK)) {
-                currency.withPrefix(Lang.COMMAND_CURRENCY_GIVE_DONE.getMessage()).send(context.getSender(), replacer -> replacer
-                    .replace(currency.replacePlaceholders())
-                    .replace(Placeholders.PLAYER_NAME, user.getName())
-                    .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
-                    .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
-                );
-            }
+        if (!arguments.hasFlag(CommandFlags.SILENT_FEEDBACK)) {
+            currency.withPrefix(Lang.COMMAND_CURRENCY_GIVE_DONE.getMessage()).send(context.getSender(), replacer -> replacer
+                .replace(currency.replacePlaceholders())
+                .replace(Placeholders.PLAYER_NAME, user.getName())
+                .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
+                .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
+            );
+        }
 
-            Player target = user.getPlayer();
-            if (!arguments.hasFlag(CommandFlags.SILENT) && target != null) {
-                currency.withPrefix(Lang.COMMAND_CURRENCY_GIVE_NOTIFY.getMessage()).send(target, replacer -> replacer
-                    .replace(currency.replacePlaceholders())
-                    .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
-                    .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
-                );
-            }
-        });
+        Player target = user.getPlayer();
+        if (!arguments.hasFlag(CommandFlags.SILENT) && target != null) {
+            currency.withPrefix(Lang.COMMAND_CURRENCY_GIVE_NOTIFY.getMessage()).send(target, replacer -> replacer
+                .replace(currency.replacePlaceholders())
+                .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
+                .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
+            );
+        }
 
         return true;
     }
@@ -367,36 +377,34 @@ public class CurrencyCommands {
         double amount = arguments.getDoubleArgument(CommandArguments.AMOUNT);
         if (amount < 0D) return false;
 
-        plugin.getUserManager().manageUser(arguments.getStringArgument(CommandArguments.PLAYER), user -> {
-            if (user == null) {
-                context.errorBadPlayer();
-                return;
-            }
+        String identifier = arguments.getStringArgument(CommandArguments.PLAYER);
+        final CoinsUser user = getUserFromIdentifier(plugin, identifier);
+        if (user == null) {
+            context.errorBadPlayer();
+            return false;
+        }
 
-            user.setBalance(currency, amount);
+        user.setBalance(currency, amount);
 
-            plugin.getUserManager().save(user);
-            plugin.getCoinsLogger().logSet(user, currency, amount, context.getSender());
+        plugin.getUserManager().save(user);
+        plugin.getCoinsLogger().logSet(user, currency, amount, context.getSender());
 
-            if (!arguments.hasFlag(CommandFlags.SILENT_FEEDBACK)) {
-                currency.withPrefix(Lang.COMMAND_CURRENCY_SET_DONE.getMessage()).send(context.getSender(), replacer -> replacer
-                    .replace(currency.replacePlaceholders())
-                    .replace(Placeholders.PLAYER_NAME, user.getName())
-                    .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
-                    .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
-                );
-            }
+        if (!arguments.hasFlag(CommandFlags.SILENT_FEEDBACK)) {
+            currency.withPrefix(Lang.COMMAND_CURRENCY_SET_DONE.getMessage()).send(context.getSender(), replacer -> replacer
+                .replace(currency.replacePlaceholders())
+                .replace(Placeholders.PLAYER_NAME, user.getName())
+                .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
+            );
+        }
 
-            Player target = user.getPlayer();
+        Player target = user.getPlayer();
+        if (!arguments.hasFlag(CommandFlags.SILENT) && target != null) {
+            currency.withPrefix(Lang.COMMAND_CURRENCY_SET_NOTIFY.getMessage()).send(target, replacer -> replacer
+                .replace(currency.replacePlaceholders())
+                .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
+            );
+        }
 
-            if (!arguments.hasFlag(CommandFlags.SILENT) && target != null) {
-                currency.withPrefix(Lang.COMMAND_CURRENCY_SET_NOTIFY.getMessage()).send(target, replacer -> replacer
-                    .replace(currency.replacePlaceholders())
-                    .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
-                    .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
-                );
-            }
-        });
         return true;
     }
 
@@ -404,35 +412,45 @@ public class CurrencyCommands {
         double amount = arguments.getDoubleArgument(CommandArguments.AMOUNT);
         if (amount <= 0D) return false;
 
-        plugin.getUserManager().manageUser(arguments.getStringArgument(CommandArguments.PLAYER), user -> {
-            if (user == null) {
-                context.errorBadPlayer();
-                return;
-            }
+        String identifier = arguments.getStringArgument(CommandArguments.PLAYER);
+        final CoinsUser user = getUserFromIdentifier(plugin, identifier);
+        if (user == null) {
+            context.errorBadPlayer();
+            return false;
+        }
 
-            user.removeBalance(currency, amount);
+        if (user.getBalance(currency) < amount) {
+            currency.withPrefix(Lang.COMMAND_CURRENCY_SEND_ERROR_NOT_ENOUGH.getMessage()).send(context.getSender(), replacer -> replacer
+                .replace(currency.replacePlaceholders())
+                .replace(Placeholders.PLAYER_NAME, user.getName())
+                .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
+                .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
+            );
+            return false;
+        }
 
-            plugin.getUserManager().save(user);
-            plugin.getCoinsLogger().logTake(user, currency, amount, context.getSender());
+        user.removeBalance(currency, amount);
+        plugin.getUserManager().save(user);
+        plugin.getCoinsLogger().logTake(user, currency, amount, context.getSender());
 
-            if (!arguments.hasFlag(CommandFlags.SILENT_FEEDBACK)) {
-                currency.withPrefix(Lang.COMMAND_CURRENCY_TAKE_DONE.getMessage()).send(context.getSender(), replacer -> replacer
-                    .replace(currency.replacePlaceholders())
-                    .replace(Placeholders.PLAYER_NAME, user.getName())
-                    .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
-                    .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
-                );
-            }
+        if (!arguments.hasFlag(CommandFlags.SILENT_FEEDBACK)) {
+            currency.withPrefix(Lang.COMMAND_CURRENCY_TAKE_DONE.getMessage()).send(context.getSender(), replacer -> replacer
+                .replace(currency.replacePlaceholders())
+                .replace(Placeholders.PLAYER_NAME, user.getName())
+                .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
+                .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
+            );
+        }
 
-            Player target = user.getPlayer();
-            if (!arguments.hasFlag(CommandFlags.SILENT) && target != null) {
-                currency.withPrefix(Lang.COMMAND_CURRENCY_TAKE_NOTIFY.getMessage()).send(target, replacer -> replacer
-                    .replace(currency.replacePlaceholders())
-                    .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
-                    .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
-                );
-            }
-        });
+        Player target = user.getPlayer();
+        if (!arguments.hasFlag(CommandFlags.SILENT) && target != null) {
+            currency.withPrefix(Lang.COMMAND_CURRENCY_TAKE_NOTIFY.getMessage()).send(target, replacer -> replacer
+                .replace(currency.replacePlaceholders())
+                .replace(Placeholders.GENERIC_AMOUNT, currency.format(amount))
+                .replace(Placeholders.GENERIC_BALANCE, currency.format(user.getBalance(currency)))
+            );
+        }
+
         return true;
     }
 

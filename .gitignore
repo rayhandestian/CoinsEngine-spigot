@@ -1,2 +1,7 @@
 /target/
 /.idea/
+/apache-maven-*/
+*.iml
+.classpath
+.project
+.settings/

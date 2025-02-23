@@ -9,12 +9,30 @@ import su.nightexpress.nightcore.command.experimental.argument.CommandArgument;
 import su.nightexpress.nightcore.command.experimental.builder.ArgumentBuilder;
 import su.nightexpress.nightcore.util.Lists;
 
+import java.util.UUID;
+
 public class CommandArguments {
 
     public static final String PLAYER   = "player";
     public static final String AMOUNT   = "amount";
     public static final String CURRENCY = "currency";
     public static final String NAME     = "name";
+
+    @NotNull
+    public static ArgumentBuilder<String> playerOrUUID() {
+        return CommandArgument.builder(PLAYER, (input, context) -> {
+            try {
+                // Try to parse as UUID first
+                UUID.fromString(input);
+                return input;
+            }
+            catch (IllegalArgumentException e) {
+                // If not UUID, treat as player name
+                return input;
+            }
+        })
+        .withSamples(context -> Lists.newList("<player_name>", "<UUID>"));
+    }
 
     @NotNull
     public static ArgumentBuilder<Currency> currency(@NotNull CoinsEnginePlugin plugin) {
